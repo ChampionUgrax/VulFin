@@ -5,7 +5,7 @@ This file contains general development notes for the VulFin project.
 
 ## Project Status
 
-- Frontend: Streamlit
+- Frontend: Streamli t
 - Backend: Python
 - Purpose: Website security vulnerability analysis
 
