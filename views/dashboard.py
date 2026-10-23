@@ -64,7 +64,15 @@ def render_dashboard():
                 st.caption(
                     f"{item['file']} · Line {item.get('line') or 'N/A'}"
                 )
-                st.write(item["recommendation"])
+                st.write(
+    item.get(
+        "recommendation",
+        item.get(
+            "description",
+            "No recommendation available for this finding."
+        )
+    )
+)
 
     with right:
         st.markdown("#### Severity distribution")
