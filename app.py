@@ -1,8 +1,10 @@
+
 from pathlib import Path
+from copy import deepcopy
+import base64
 
 import streamlit as st
 
-from data import load_demo_findings
 from views.dashboard import render_dashboard
 from views.new_scan import render_new_scan
 from views.findings import render_findings
@@ -11,141 +13,195 @@ from views.verification import render_verification
 from views.export_report import render_export_report
 
 
-# =====================================================
-# 1. PROJECT PATHS
-# =====================================================
+# ======================================================
+# CONFIGURATION
+# ======================================================
 
 BASE_DIR = Path(__file__).resolve().parent
 LOGO_PATH = BASE_DIR / "assets" / "vulfin.png"
 
-
-# =====================================================
-# 2. PAGE CONFIGURATION
-# =====================================================
-
 st.set_page_config(
-    page_title="VulFin | AI Security Reviewer",
-    page_icon=str(LOGO_PATH) if LOGO_PATH.is_file() else "🛡️",
+    page_title="VulFin | AI Security Assistant",
+    page_icon=str(LOGO_PATH) if LOGO_PATH.exists() else "🛡️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 
-# =====================================================
-# 3. GLOBAL STYLING
-# =====================================================
+# ======================================================
+# SESSION STATE
+# ======================================================
+
+DEFAULT_STATE = {
+    "active_page": "Dashboard",
+    "findings": [],
+    "demo_mode": False,
+    "project_name": "",
+    "scan_status": "Not scanned",
+    "scan_id": None,
+    "scan_timestamp": None,
+    "files_scanned": 0,
+    "scan_summary": {},
+    "scan_errors": [],
+    "last_scan_snapshot": None,
+    "previous_scan_snapshot": None,
+    "verification_results": None,
+    "has_real_scan": False,
+    "last_real_findings": [],
+    "selected_finding_id": None,
+    "last_generated_prompt": None,
+    "last_prompt_finding_id": None,
+    "last_prompt_style": None,
+    "review_status": {},
+    "latest_scan_attempt_status": None,
+}
+
+for key, value in DEFAULT_STATE.items():
+    if key not in st.session_state:
+        st.session_state[key] = deepcopy(value)
+
+
+# ======================================================
+# NAVIGATION
+# ======================================================
+
+PAGES = {
+    "Dashboard": render_dashboard,
+    "New Scan": render_new_scan,
+    "Findings": render_findings,
+    "Fix Assistant": render_fix_assistant,
+    "Verification": render_verification,
+    "Export Report": render_export_report,
+}
+
+if st.session_state.active_page not in PAGES:
+    st.session_state.active_page = "Dashboard"
+
+
+# ======================================================
+# STYLING
+# ======================================================
 
 st.markdown(
     """
     <style>
+    [data-testid="stAppViewContainer"] {
+        background: #0D1117;
+    }
+
     .block-container {
         max-width: 1450px;
-        padding-top: 1.3rem;
-        padding-bottom: 3rem;
+        padding-top: 1.6rem;
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
+        padding-bottom: 2rem;
     }
 
-    [data-testid="stSidebar"] {
-        background: #0B111B;
-        border-right: 1px solid #243044;
+    [data-testid="stSidebar"],
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="collapsedControl"] {
+        display: none !important;
     }
 
-    [data-testid="stSidebar"] .block-container {
-        padding-top: 1.2rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
+    .vf-brand {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 12px 0 14px;
+        width: 100%;
     }
 
-    .vf-brand-label {
-        color: #F4F7FB;
-        font-size: 1.55rem;
+    .vf-logo {
+        width: 72px;
+        height: auto;
+        max-height: 72px;
+        object-fit: contain;
+    }
+
+    .vf-name {
+        font-size: 32px;
+        line-height: 1.2;
         font-weight: 800;
+        color: #F4F7FB;
         margin: 0;
     }
 
-    .vf-brand-caption {
-        color: #8FA2B9;
-        font-size: 0.65rem;
-        font-weight: 700;
-        letter-spacing: 0.11rem;
-        margin-top: 3px;
+    .st-key-vf_navigation [data-testid="stHorizontalBlock"] {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 8px;
     }
 
-    .vf-section-label {
-        color: #8294AA;
-        font-size: 0.68rem;
-        font-weight: 700;
-        letter-spacing: 0.13rem;
-        margin: 0.8rem 0 0.5rem 0;
+    .st-key-vf_navigation [data-testid="column"] {
+        min-width: 0 !important;
     }
 
-    .vf-muted {
-        color: #A7B6C8;
-        font-size: 0.91rem;
-    }
-
-    .vf-eyebrow {
-        color: #57E3C0;
-        font-size: 0.74rem;
-        font-weight: 700;
-        letter-spacing: 0.12rem;
-        text-transform: uppercase;
-    }
-
-    .vf-side-note {
-        color: #91A1B5;
-        font-size: 0.78rem;
-        line-height: 1.5;
-    }
-
-    [data-testid="stMetric"] {
-        background: #161B26;
-        border: 1px solid #293447;
-        border-radius: 12px;
-        padding: 15px;
-    }
-
-    [data-testid="stSidebar"] div.stButton > button {
+    .st-key-vf_navigation div.stButton > button {
         width: 100%;
         min-height: 43px;
-        text-align: left;
-        justify-content: flex-start;
-        border-radius: 10px;
-        padding: 0.55rem 0.8rem;
-        font-size: 0.9rem;
-        font-weight: 600;
+        border-radius: 9px;
+        font-size: 14px;
+        font-weight: 650;
     }
 
-    [data-testid="stSidebar"]
-    div.stButton > button[kind="secondary"] {
-        background: transparent;
-        color: #B7C4D6;
-        border: 1px solid transparent;
-    }
-
-    [data-testid="stSidebar"]
-    div.stButton > button[kind="secondary"]:hover {
-        background: #182438;
-        color: #FFFFFF;
-        border: 1px solid #2B3A50;
-    }
-
-    [data-testid="stSidebar"]
+    .st-key-vf_navigation
     div.stButton > button[kind="primary"] {
         background: #57E3C0;
         color: #071711;
         border: 1px solid #57E3C0;
-        font-weight: 750;
     }
 
-    [data-testid="stSidebar"] hr {
-        border-color: #243044;
-        margin: 1rem 0;
+    .st-key-vf_navigation
+    div.stButton > button[kind="secondary"] {
+        background: #161B26;
+        color: #D0D9E5;
+        border: 1px solid #293447;
     }
 
-    div.stButton > button {
-        border-radius: 9px;
-        font-weight: 600;
-        min-height: 2.5rem;
+    .st-key-vf_navigation
+    div.stButton > button[kind="secondary"]:hover {
+        border-color: #57E3C0;
+        color: white;
+    }
+
+    @media (max-width: 900px) {
+        .st-key-vf_navigation [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+        }
+
+        .st-key-vf_navigation [data-testid="column"] {
+            flex: 1 1 29% !important;
+            width: 29% !important;
+            max-width: none !important;
+        }
+    }
+
+    @media (max-width: 560px) {
+        .block-container {
+            padding-top: 1rem;
+            padding-left: .7rem;
+            padding-right: .7rem;
+        }
+
+        .vf-logo {
+            width: 55px;
+            max-height: 55px;
+        }
+
+        .vf-name {
+            font-size: 25px;
+        }
+
+        .st-key-vf_navigation [data-testid="column"] {
+            flex: 1 1 44% !important;
+            width: 44% !important;
+            max-width: none !important;
+        }
+
+        .st-key-vf_navigation div.stButton > button {
+            font-size: 12px;
+        }
     }
     </style>
     """,
@@ -153,209 +209,61 @@ st.markdown(
 )
 
 
-# =====================================================
-# 4. SHARED SESSION STATE
-# =====================================================
+# ======================================================
+# CENTERED LOGO + NAME
+# ======================================================
 
-DEFAULTS = {
-    "findings": [],
-    "demo_mode": False,
-    "project_name": "",
-    "scan_status": "Not scanned",
-    "active_page": "Dashboard",
-    "last_real_findings": [],
-    "verification_results": None,
-    "has_real_scan": False,
-    "scan_id": None,
-}
+logo_html = ""
 
-for key, value in DEFAULTS.items():
-    if key not in st.session_state:
-        st.session_state[key] = value
+if LOGO_PATH.is_file():
+    logo_base64 = base64.b64encode(
+        LOGO_PATH.read_bytes()
+    ).decode("utf-8")
 
-
-# =====================================================
-# 5. SIDEBAR NAVIGATION
-# =====================================================
-
-NAV_ITEMS = [
-    ("Dashboard", "▦"),
-    ("New Scan", "＋"),
-    ("Findings", "⚑"),
-    ("Fix Assistant", "✦"),
-    ("Verification", "↻"),
-    ("Export Report", "⇩"),
-]
-
-with st.sidebar:
-
-    # Use the complete image at a fixed width.
-    # No cropping CSS or fixed image height is applied.
-    if LOGO_PATH.is_file():
-        st.image(
-            str(LOGO_PATH),
-            width=210,
-            caption=None,
-            output_format="PNG",
-        )
-    else:
-        st.error("VulFin logo could not be found.")
-        st.code(str(LOGO_PATH))
-
-    st.markdown(
-        '<p class="vf-brand-label">VulFin</p>'
-        '<p class="vf-brand-caption">SECURITY WORKSPACE</p>',
-        unsafe_allow_html=True,
+    logo_html = (
+        f'<img class="vf-logo" '
+        f'src="data:image/png;base64,{logo_base64}" '
+        f'alt="VulFin logo">'
     )
 
-    st.divider()
-
-    st.markdown(
-        '<div class="vf-section-label">MAIN MENU</div>',
-        unsafe_allow_html=True,
-    )
-
-    for label, symbol in NAV_ITEMS:
-
-        is_active = st.session_state.active_page == label
-
-        if st.button(
-            f"{symbol}   {label}",
-            key=f"nav_{label.lower().replace(' ', '_')}",
-            use_container_width=True,
-            type="primary" if is_active else "secondary",
-        ):
-            st.session_state.active_page = label
-            st.rerun()
-
-    st.divider()
-
-    st.markdown(
-        '<div class="vf-section-label">DEVELOPMENT TOOLS</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<p class="vf-side-note">'
-        'Explore the interface using sample security findings.'
-        '</p>',
-        unsafe_allow_html=True,
-    )
-
-    if st.button(
-        "＋   Load demo findings",
-        key="sidebar_load_demo",
-        use_container_width=True,
-    ):
-        load_demo_findings()
-        st.session_state.verification_results = None
-        st.session_state.active_page = "Dashboard"
-        st.rerun()
-
-    if st.button(
-        "↺   Clear results",
-        key="sidebar_clear_results",
-        use_container_width=True,
-    ):
-        st.session_state.findings = []
-        st.session_state.demo_mode = False
-        st.session_state.project_name = ""
-        st.session_state.scan_status = "Not scanned"
-        st.session_state.last_real_findings = []
-        st.session_state.verification_results = None
-        st.session_state.has_real_scan = False
-        st.session_state.scan_id = None
-        st.session_state.active_page = "Dashboard"
-        st.rerun()
-
-    st.divider()
-
-    st.markdown(
-        '<p class="vf-side-note">'
-        '<span style="color:#57E3C0;">●</span> '
-        'Frontend prototype<br>CY-02 · VulFin'
-        '</p>',
-        unsafe_allow_html=True,
-    )
-
-
-# =====================================================
-# 6. MAIN HEADER
-# =====================================================
-
-# Give the logo enough horizontal space so it is not
-# squeezed into a narrow column.
-logo_col, brand_col = st.columns(
-    [2, 5],
-    vertical_alignment="center",
+st.markdown(
+    f"""
+    <div class="vf-brand">
+        {logo_html}
+        <h1 class="vf-name">VulFin</h1>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-with logo_col:
 
-    if LOGO_PATH.is_file():
-        st.image(
-            str(LOGO_PATH),
-            width=245,
-            caption=None,
-            output_format="PNG",
-        )
-    else:
-        st.error("VulFin logo is missing.")
-        st.caption(str(LOGO_PATH))
+# ======================================================
+# SIX PAGE NAVIGATION
+# ======================================================
 
-with brand_col:
+with st.container(key="vf_navigation"):
+    columns = st.columns(6, gap="small")
 
-    st.markdown(
-        '<p class="vf-eyebrow">VULFIN SECURITY WORKSPACE</p>',
-        unsafe_allow_html=True,
-    )
+    for column, page_name in zip(columns, PAGES):
+        with column:
+            selected = (
+                st.session_state.active_page == page_name
+            )
 
-    st.markdown("## VulFin")
-
-    st.markdown(
-        '<p class="vf-muted">'
-        'AI Security Reviewer for AI-generated websites'
-        '</p>',
-        unsafe_allow_html=True,
-    )
+            if st.button(
+                page_name,
+                key=f"nav_{page_name.lower().replace(' ', '_')}",
+                type="primary" if selected else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state.active_page = page_name
+                st.rerun()
 
 st.divider()
 
 
-# =====================================================
-# 7. DEMO-MODE INDICATOR
-# =====================================================
+# ======================================================
+# RENDER SELECTED PAGE
+# ======================================================
 
-if st.session_state.demo_mode:
-    st.warning(
-        "DEMO MODE — these findings are illustrative examples. "
-        "They are not results from scanning your uploaded source code."
-    )
-
-
-# =====================================================
-# 8. PAGE ROUTER
-# =====================================================
-
-page = st.session_state.active_page
-
-if page == "Dashboard":
-    render_dashboard()
-
-elif page == "New Scan":
-    render_new_scan()
-
-elif page == "Findings":
-    render_findings()
-
-elif page == "Fix Assistant":
-    render_fix_assistant()
-
-elif page == "Verification":
-    render_verification()
-
-elif page == "Export Report":
-    render_export_report()
-
-else:
-    st.error("Unknown page. Select a page from the sidebar.")
+PAGES[st.session_state.active_page]()

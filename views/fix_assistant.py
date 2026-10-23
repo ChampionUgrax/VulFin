@@ -15,7 +15,7 @@ def render_fix_assistant():
 
     if not findings:
         st.info(
-            "No findings are loaded. Load demo findings or complete a scan."
+            "No findings are loaded."
         )
         return
 

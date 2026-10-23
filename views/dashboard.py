@@ -21,7 +21,6 @@ def render_dashboard():
             )
             st.info(
                 "The scanner is not connected yet. "
-                "Use Load demo findings in the sidebar to preview the UI."
             )
         return
 

@@ -120,3 +120,39 @@ Explain the change and the tests required.
 Do not invent credentials or expose hidden secrets.
 Do not claim the issue is fixed without a successful rescan.
 """.strip()
+
+def initialise_session_state():
+    """Initialise shared state used by VulFin's pages and workflows."""
+    defaults = {
+        "findings": [],
+        "demo_mode": False,
+        "project_name": "",
+        "scan_status": "Not scanned",
+        "active_page": "Dashboard",
+        "last_real_findings": [],
+        "verification_results": None,
+        "has_real_scan": False,
+        "scan_id": None,
+        "scan_files_scanned": None,
+        "scan_timestamp": None,
+        "selected_finding_id": None,
+    }
+
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def clear_results():
+    """Clear scan results and metadata without resetting navigation widgets."""
+    st.session_state.findings = []
+    st.session_state.demo_mode = False
+    st.session_state.project_name = ""
+    st.session_state.scan_status = "Not scanned"
+    st.session_state.last_real_findings = []
+    st.session_state.verification_results = None
+    st.session_state.has_real_scan = False
+    st.session_state.scan_id = None
+    st.session_state.scan_files_scanned = None
+    st.session_state.scan_timestamp = None
+    st.session_state.selected_finding_id = None
