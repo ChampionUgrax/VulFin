@@ -1,19 +1,28 @@
-
 def generate_repair_prompt(finding: dict) -> str:
     """Generate a focused repair prompt without exposing secret values."""
 
-    file_path = finding.get("file", "unknown file")
-    line = finding.get("line", "unknown")
-    title = finding.get("title", "Potential security issue")
-    rule_id = finding.get("rule_id", "UNKNOWN")
-    explanation = finding.get(
-        "explanation",
-        "Review the finding and confirm the security risk.",
+    file_path = finding.get("file") or "unknown file"
+    line = finding.get("line")
+    title = finding.get("title") or "Potential security issue"
+
+    rule_id = (
+        finding.get("rule_id")
+        or finding.get("id")
+        or finding.get("rule")
+        or "UNKNOWN"
     )
-    remediation = finding.get(
-        "remediation",
-        "Apply the appropriate secure coding practice.",
+
+    explanation = finding.get("explanation") or (
+        "Review the finding and confirm the security risk."
     )
+
+    remediation = (
+        finding.get("remediation")
+        or finding.get("recommendation")
+        or "Apply the appropriate secure coding practice."
+    )
+
+    line_text = line if line is not None else "unknown"
 
     return f"""
 You are fixing a security finding in a website codebase.
@@ -21,7 +30,7 @@ You are fixing a security finding in a website codebase.
 Finding: {title}
 Rule ID: {rule_id}
 File: {file_path}
-Approximate line: {line}
+Approximate line: {line_text}
 
 Why it matters:
 {explanation}

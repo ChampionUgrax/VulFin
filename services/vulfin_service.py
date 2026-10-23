@@ -88,9 +88,9 @@ def generate_repair_prompt(finding: dict) -> str:
     or use the local template if that module is absent.
     """
     remediation_function = _load_backend_function(
-        "remediation",
-        "build_repair_prompt",
-    )
+    "Intelligence.remediation",
+    "generate_repair_prompt",
+)
 
     if remediation_function is None:
         return make_repair_prompt(finding)

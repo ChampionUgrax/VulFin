@@ -174,6 +174,114 @@ def calculate_health_score(findings: List[Dict[str, Any]]) -> int:
     score = 100 - sum(deductions.get(f.get("severity", "LOW"), 5) for f in findings)
     return max(0, min(100, score))
 
+def _run_gitleaks(directory_path: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Run Gitleaks safely and convert its JSON report into VulFin findings."""
+
+    executable = shutil.which("gitleaks")
+
+    # Support the Windows winget installation even when PATH is not updated.
+    if not executable:
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            candidate = (
+                Path(local_app_data)
+                / "Microsoft"
+                / "WinGet"
+                / "Packages"
+                / "Gitleaks.Gitleaks_Microsoft.Winget.Source_8wekyb3d8bbwe"
+                / "gitleaks.exe"
+            )
+            if candidate.is_file():
+                executable = str(candidate)
+
+    if not executable:
+        return [], "Gitleaks unavailable; only the built-in scanner ran."
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="vulfin_gitleaks_") as report_dir:
+            report_path = os.path.join(report_dir, "report.json")
+
+            result = subprocess.run(
+                [
+                    executable,
+                    "dir",
+                    "--report-format", "json",
+                    "--report-path", report_path,
+                    "--exit-code", "0",
+                    "--redact=100",
+                    "--no-banner",
+                    "--log-level", "error",
+                    "--timeout", "60",
+                    directory_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=75,
+                check=False,
+            )
+
+            if result.returncode != 0:
+                return [], "Gitleaks failed; check its installation and scan configuration."
+
+            if not os.path.isfile(report_path):
+                return [], "Gitleaks did not produce a report."
+
+            with open(report_path, "r", encoding="utf-8") as report_file:
+                records = json.load(report_file)
+
+            if not isinstance(records, list):
+                return [], "Gitleaks returned an unexpected report format."
+
+            findings = []
+
+            for item in records:
+                if not isinstance(item, dict):
+                    continue
+
+                rule_id = str(item.get("RuleID") or "unknown")
+                file_path = str(item.get("File") or "unknown")
+                line_number = item.get("StartLine", 1)
+
+                # Never include Secret, Match, or raw scanner output in findings.
+                try:
+                    line_number = int(line_number)
+                except (TypeError, ValueError):
+                    line_number = 1
+
+                if os.path.isabs(file_path):
+                    file_path = os.path.relpath(file_path, directory_path)
+
+                file_path = file_path.replace("\\", "/")
+
+                findings.append({
+                    "id": f"GITLEAKS-{rule_id.upper()}",
+                    "rule_id": rule_id,
+                    "title": str(
+                        item.get("Description") or "Potential secret detected by Gitleaks"
+                    ),
+                    "severity": "HIGH",
+                    "category": "HARDCODED_SECRET",
+                    "secret_type": rule_id,
+                    "file": file_path,
+                    "line": line_number,
+                    "evidence": "Potential secret detected by Gitleaks; secret value redacted.",
+                    "recommendation": (
+                        "Verify whether the value is a real credential. If exposed, "
+                        "revoke or rotate it and move secrets to secure configuration."
+                    ),
+                    "fingerprint": str(item.get("Fingerprint") or ""),
+                    "status": "open",
+                    "confidence": "medium",
+                })
+
+            return findings, None
+
+    except subprocess.TimeoutExpired:
+        return [], "Gitleaks exceeded the 75-second execution limit."
+    except (OSError, ValueError, json.JSONDecodeError):
+        return [], "Gitleaks could not complete or parse its report."
+
+
 
 def scan_project(directory_path: str) -> Dict[str, Any]:
     if not os.path.isdir(directory_path):
@@ -193,7 +301,21 @@ def scan_project(directory_path: str) -> Dict[str, Any]:
                 scanned += 1
     except OSError as exc:
         return _result(directory_path, "directory", "failed", findings, scanned, [f"Directory traversal failed: {type(exc).__name__}"])
-    return _result(directory_path, "directory", "completed", findings, scanned)
+
+    gitleaks_findings, gitleaks_error = _run_gitleaks(directory_path)
+    findings.extend(gitleaks_findings)
+
+    errors = [gitleaks_error] if gitleaks_error else []
+
+    return _result(
+        directory_path,
+        "directory",
+        "completed",
+        findings,
+        scanned,
+        errors,
+    )
+
 
 
 def scan_single_file(file_path: str) -> Dict[str, Any]:
