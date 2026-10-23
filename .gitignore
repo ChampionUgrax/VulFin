@@ -1,0 +1,12 @@
+# Python environment
+.venv/
+# Python cache
+__pycache__/
+*.py[cod]
+# Local environment variables and secrets
+.env
+# Test cache
+.pytest_cache/
+# Local generated scanner reports
+semgrep-report.json
+gitleaks-report.json
