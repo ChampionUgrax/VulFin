@@ -18,6 +18,9 @@ import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
+import shutil
+import subprocess
+
 
 SCANNER_VERSION = "1.1.0"
 SCANNABLE_EXTENSIONS = {
