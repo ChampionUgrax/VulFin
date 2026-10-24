@@ -1,6 +1,5 @@
-import importlib
 
-from data import make_repair_prompt
+import importlib
 
 
 class BackendNotReadyError(RuntimeError):
@@ -8,47 +7,47 @@ class BackendNotReadyError(RuntimeError):
 
 
 def _load_backend_function(module_name: str, function_name: str):
-    """
-    Load a backend function dynamically.
+    """Load a backend function from the project root or Intelligence package."""
 
-    Returns None when the entire module is missing.
-    Raises BackendNotReadyError when the module exists
-    but does not expose the expected function.
-    """
-    try:
-        module = importlib.import_module(module_name)
+    package_names = ("", "intelligence", "Intelligence")
 
-    except ModuleNotFoundError as exc:
-        # Only handle the missing backend module itself.
-        # Don't hide missing dependencies inside that module.
-        if exc.name == module_name:
-            return None
-        raise
+    for package_name in package_names:
+        qualified_name = (
+            f"{package_name}.{module_name}"
+            if package_name
+            else module_name
+        )
 
-    function = getattr(module, function_name, None)
+        try:
+            module = importlib.import_module(qualified_name)
 
-    if not callable(function):
+        except ModuleNotFoundError as exc:
+            possible_module_names = {
+                qualified_name,
+                qualified_name.split(".")[0],
+            }
+
+            if exc.name not in possible_module_names:
+                raise
+
+            continue
+
+        function = getattr(module, function_name, None)
+
+        if callable(function):
+            return function
+
         raise BackendNotReadyError(
-            f"{module_name}.py must define a callable "
+            f"{qualified_name} must define a callable "
             f"'{function_name}()' function."
         )
 
-    return function
+    return None
 
 
 def run_security_scan(zip_bytes: bytes, filename: str) -> dict:
-    """
-    Run the scanner.
+    """Run the scanner on an uploaded project."""
 
-    Expected function:
-        scanner.scan_project(zip_bytes, filename)
-
-    Expected result:
-        {
-            "scan_id": "...",
-            "findings": [...]
-        }
-    """
     scan_function = _load_backend_function(
         "scanner",
         "scan_project",
@@ -63,9 +62,7 @@ def run_security_scan(zip_bytes: bytes, filename: str) -> dict:
     result = scan_function(zip_bytes, filename)
 
     if not isinstance(result, dict):
-        raise ValueError(
-            "The scanner must return a dictionary."
-        )
+        raise ValueError("The scanner must return a dictionary.")
 
     findings = result.get("findings")
 
@@ -84,29 +81,45 @@ def run_security_scan(zip_bytes: bytes, filename: str) -> dict:
 
 def generate_repair_prompt(finding: dict) -> str:
     """
-    Generate a repair prompt using remediation.py
-    or use the local template if that module is absent.
+    Generate a custom repair prompt with Gemini.
+    Do not fall back to a hardcoded repair prompt.
     """
     remediation_function = _load_backend_function(
     "Intelligence.remediation",
     "generate_repair_prompt",
 )
 
-    if remediation_function is None:
-        return make_repair_prompt(finding)
+    normalized_finding.setdefault(
+        "explanation",
+        "Review the finding and verify whether the security risk is real.",
+    )
 
-    prompt = remediation_function(finding)
+    # Try both supported package capitalizations.
+    repair_function = _load_backend_function(
+        "llm_reviewer",
+        "generate_repair_prompt_with_gemini",
+    )
+
+    if repair_function is None:
+        raise BackendNotReadyError(
+            "Gemini repair-prompt generation is unavailable. "
+            "Ensure intelligence/llm_reviewer.py defines "
+            "generate_repair_prompt_with_gemini(finding)."
+        )
+
+    prompt = repair_function(normalized_finding)
 
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError(
-            "The remediation module returned an empty or invalid prompt."
+            "Gemini returned an empty or invalid repair prompt."
         )
 
-    return prompt
+    return prompt.strip()
 
 
 def _finding_key(finding: dict) -> str:
     """Create a key to match findings across scans."""
+
     fingerprint = finding.get("fingerprint")
 
     if fingerprint:
@@ -125,7 +138,8 @@ def _compare_findings(
     old_findings: list[dict],
     new_findings: list[dict],
 ) -> dict:
-    """Fallback comparison when verification.py is absent."""
+    """Compare findings when verification.py is unavailable."""
+
     old_map = {
         _finding_key(item): item
         for item in old_findings
@@ -165,29 +179,15 @@ def compare_scan_results(
     old_findings: list[dict],
     new_findings: list[dict],
 ) -> dict:
-    """
-    Compare earlier and later scan results.
+    """Compare earlier and later scan results."""
 
-    Expected function in verification.py:
-        compare_scans(old_findings, new_findings)
-
-    Expected result:
-        {
-            "fixed": [...],
-            "remaining": [...],
-            "new": [...]
-        }
-    """
     verification_function = _load_backend_function(
         "verification",
         "compare_scans",
     )
 
     if verification_function is None:
-        return _compare_findings(
-            old_findings,
-            new_findings,
-        )
+        return _compare_findings(old_findings, new_findings)
 
     result = verification_function(
         old_findings,
@@ -199,12 +199,33 @@ def compare_scan_results(
             "The verification module must return a dictionary."
         )
 
-    required_keys = ("fixed", "remaining", "new")
-
-    for key in required_keys:
+    for key in ("fixed", "remaining", "new"):
         if not isinstance(result.get(key), list):
             raise ValueError(
                 f"The verification result must contain a '{key}' list."
             )
 
     return result
+
+
+def analyze_finding_with_gemini(finding: dict) -> str:
+    """Generate an AI security review for one finding."""
+
+    if not isinstance(finding, dict):
+        raise ValueError(
+            "The selected finding must be a dictionary."
+        )
+
+    reviewer = _load_backend_function(
+        "llm_reviewer",
+        "review_finding_with_gemini",
+    )
+
+    if reviewer is None:
+        raise BackendNotReadyError(
+            "Gemini security review is unavailable. "
+            "Ensure intelligence/llm_reviewer.py defines "
+            "review_finding_with_gemini(finding)."
+        )
+
+    return reviewer(finding)
