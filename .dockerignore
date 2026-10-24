@@ -1,0 +1,13 @@
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.env
+.env.*
+!.env.example
+*.bak
+gitleaks-report.json
+semgrep-report.json
+samples/gitleaks_test

@@ -1,5 +1,5 @@
-
-from intelligence.comparison import compare_findings
+﻿
+from Intelligence.comparison import compare_findings
 
 
 def test_compare_findings():
@@ -46,8 +46,8 @@ def test_every_issue_resolved():
     assert result["summary"]["new"] == 0
 
 
-from intelligence.explanations import explain_finding
-from intelligence.remediation import generate_repair_prompt
+from Intelligence.explanations import explain_finding
+from Intelligence.remediation import generate_repair_prompt
 
 
 def test_explanation_and_repair_prompt():
@@ -73,3 +73,21 @@ def test_explanation_and_repair_prompt():
     assert "SECRET-001" in prompt
     assert "secure configuration" in prompt
     assert "unrelated" in prompt.lower()
+
+
+def test_scanner_style_finding_uses_recommendation():
+    finding = {
+        "id": "SEC-OPENAI",
+        "title": "Possible exposed OpenAI API key",
+        "category": "HARDCODED_SECRET",
+        "file": "src/config.py",
+        "line": 8,
+        "recommendation": "Move the credential to secure configuration.",
+    }
+
+    explained = explain_finding(finding)
+    prompt = generate_repair_prompt(explained)
+
+    assert "credential" in explained["explanation"].lower()
+    assert "Rule ID: SEC-OPENAI" in prompt
+    assert "Move the credential to secure configuration." in prompt

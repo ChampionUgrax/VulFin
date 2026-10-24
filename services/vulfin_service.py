@@ -84,19 +84,10 @@ def generate_repair_prompt(finding: dict) -> str:
     Generate a custom repair prompt with Gemini.
     Do not fall back to a hardcoded repair prompt.
     """
-
-    if not isinstance(finding, dict):
-        raise ValueError(
-            "The selected finding must be a dictionary."
-        )
-
-    normalized_finding = dict(finding)
-
-    normalized_finding["recommendation"] = (
-        normalized_finding.get("recommendation")
-        or normalized_finding.get("remediation")
-        or "Review the finding and determine the appropriate secure fix."
-    )
+    remediation_function = _load_backend_function(
+    "Intelligence.remediation",
+    "generate_repair_prompt",
+)
 
     normalized_finding.setdefault(
         "explanation",
