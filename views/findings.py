@@ -1,5 +1,8 @@
+
 import pandas as pd
 import streamlit as st
+
+from services.vulfin_service import analyze_finding_with_gemini
 
 
 def render_findings():
@@ -48,58 +51,61 @@ def render_findings():
 
     st.caption(f"{len(visible)} finding(s) match your filters.")
 
-    st.dataframe(
-        pd.DataFrame([
-            {
-                "ID": item["id"],
-                "Severity": item["severity"].upper(),
-                "Issue": item["title"],
-                "Category": item["category"],
-                "File": item["file"],
-                "Line": item.get("line"),
-                "Status": item.get("status", "open"),
-            }
-            for item in visible
-        ]),
-        hide_index=True,
-        use_container_width=True,
-    )
-
-    if not visible:
+    if visible:
+        st.dataframe(
+            pd.DataFrame([
+                {
+                    "ID": item.get("id", "N/A"),
+                    "Severity": item.get("severity", "info").upper(),
+                    "Issue": item.get("title", "Untitled finding"),
+                    "Category": item.get("category", "other"),
+                    "File": item.get("file", "unknown"),
+                    "Line": item.get("line"),
+                    "Status": item.get("status", "open"),
+                }
+                for item in visible
+            ]),
+            hide_index=True,
+            width="stretch",
+        )
+    else:
         st.info("No findings match the current filters.")
         return
 
     selected_id = st.selectbox(
         "Select a finding",
-        [item["id"] for item in visible],
+        [item.get("id") for item in visible],
         format_func=lambda finding_id: next(
-            item["title"]
+            item.get("title", "Untitled finding")
             for item in visible
-            if item["id"] == finding_id
+            if item.get("id") == finding_id
         ),
     )
 
     finding = next(
         item for item in visible
-        if item["id"] == selected_id
+        if item.get("id") == selected_id
     )
 
     with st.container(border=True):
-        st.subheader(finding["title"])
+        st.subheader(finding.get("title", "Untitled finding"))
 
         st.markdown(
-            f"**Severity:** {finding['severity'].upper()} "
-            f" · **Category:** `{finding['category']}`"
+            f"**Severity:** {finding.get('severity', 'info').upper()} "
+            f" · **Category:** `{finding.get('category', 'other')}`"
         )
 
         st.markdown("**Location**")
         st.code(
-            f"{finding['file']}:{finding.get('line') or 'N/A'}",
+            f"{finding.get('file', 'unknown')}:{finding.get('line') or 'N/A'}",
             language="text",
         )
 
         st.markdown("**Evidence**")
-        st.code(finding.get("evidence", "No evidence provided"))
+        st.code(
+            str(finding.get("evidence", "No evidence provided")),
+            language="text",
+        )
 
         st.markdown("**Why this matters**")
         st.write(
@@ -110,6 +116,46 @@ def render_findings():
         st.write(
             finding.get("recommendation", "Manual review required.")
         )
+
+        st.divider()
+        st.markdown("### AI security review")
+
+        finding_key = str(finding.get("id", selected_id))
+
+        if st.button(
+            "Analyze with Gemini",
+            key=f"gemini_review_{finding_key}",
+            type="primary",
+        ):
+            try:
+                with st.spinner("Gemini is reviewing the finding..."):
+                    review = analyze_finding_with_gemini(finding)
+
+                if not isinstance(review, str) or not review.strip():
+                    raise ValueError(
+                        "Gemini returned an empty response."
+                    )
+
+                st.session_state.setdefault("gemini_reviews", {})
+                st.session_state["gemini_reviews"][finding_key] = review
+                st.success("Gemini analysis completed.")
+
+            except Exception as exc:
+                # Show the actual exception to help diagnose the problem.
+                st.error(
+                    f"Gemini analysis failed: {type(exc).__name__}: {exc}"
+                )
+
+        saved_reviews = st.session_state.get("gemini_reviews", {})
+        saved_review = saved_reviews.get(finding_key)
+
+        if saved_review:
+            st.markdown("#### Gemini's assessment")
+            st.markdown(saved_review)
+            st.caption(
+                "AI-generated guidance is not proof of a vulnerability "
+                "or a verified fix. Review and test suggestions manually."
+            )
 
         st.caption(
             "Validate the evidence before treating a potential issue "
